@@ -37,7 +37,16 @@ class DKIMRecordAnalyzer:
         resolver.lifetime = 5
 
         base_selectors = [
-            'default', 'google', 'selector', 's', 'k', 'dkim', 'email', 'smtp', 'mail'
+            "default", "selector1", "selector2",
+            "s1", "s2", "k1", "k2", "dkim", "email", "smtp", 
+            "google", "google._domainkey",
+            "microsoft", "outlook", "office365", "exchange",
+            "yahoo", "aol", "protonmail", "pm",
+            "zoho", "zmail",
+            "fastmail", "fm1", "fm2",
+            "postmark", "sendgrid", "mailgun", "ses", "amazonses",
+            "mail", "newsletters"
+
         ]
         discovered_selectors = []
 
@@ -91,9 +100,16 @@ class DKIMRecordAnalyzer:
         # Merge predefined selectors with dynamically discovered selectors
         if not selectors:
             selectors = [
-                'default', 'selector1', 'selector2',
-                's1', 's2', 'k1', 'dkim', 'email', 'smtp', 'mail',
-                '20161025'
+                "default", "selector1", "selector2",
+                "s1", "s2", "k1", "k2", "dkim", "email", "smtp", 
+                "google", "google._domainkey",
+                "microsoft", "outlook", "office365", "exchange",
+                "yahoo", "aol", "protonmail", "pm",
+                "zoho", "zmail",
+                "fastmail", "fm1", "fm2",
+                "postmark", "sendgrid", "mailgun", "ses", "amazonses",
+                "mail", "newsletters"
+
             ] + dynamic_selectors
 
         # Common subdomains for DKIM records
@@ -158,6 +174,12 @@ class DKIMRecordAnalyzer:
     def perform_advanced_dkim_validation(record_dict):
         """
         Perform comprehensive DKIM record validation and security checks
+        
+        Args:
+            record_dict: Dictionary containing parsed DKIM record fields
+            
+        Returns:
+            dict: Validation results containing status and detailed messages
         """
         validation_results = {
             'is_valid': True,
@@ -221,22 +243,6 @@ class DKIMRecordAnalyzer:
                     f"Unknown flags in 't' tag: {', '.join(invalid_flags)}"
                 )
 
-        # Hash algorithm validation
-        if 'h' in record_dict:
-            hash_algorithms = record_dict['h'].split(':')
-            valid_algorithms = ['sha256', 'sha1']
-            invalid_algorithms = [h for h in hash_algorithms if h not in valid_algorithms]
-            if invalid_algorithms:
-                validation_results['warnings'].append(
-                    f"Unsupported hash algorithms: {', '.join(invalid_algorithms)}"
-                )
-
-        # Notes field
-        if 'n' in record_dict:
-            validation_results['warnings'].append(
-                f"Notes field (n=) found: {record_dict['n']}"
-            )
-
         # Service type validation
         if 's' in record_dict:
             services = record_dict['s'].split(':')
@@ -247,13 +253,21 @@ class DKIMRecordAnalyzer:
                     f"Unknown service types: {', '.join(invalid_services)}"
                 )
 
+        # Additional security checks
+        if 'g' in record_dict:  # Granularity tag
+            validation_results['warnings'].append(
+                "Granularity tag (g=) is present. This may restrict key usage"
+            )
+
+        if 'n' in record_dict:  # Notes tag
+            validation_results['warnings'].append(
+                "Notes tag (n=) is present. Verify its contents for sensitive information"
+            )
+
         return validation_results
 
     @staticmethod
     def _parse_dkim_record(record):
-        """
-        Enhanced parse DKIM record and extract fields with validation
-        """
         dkim_info = {'raw_record': record}
         parts = record.split(';')
         
@@ -261,13 +275,13 @@ class DKIMRecordAnalyzer:
             part = part.strip()
             if '=' in part:
                 key, value = part.split('=', 1)
-                key = key.strip()
+                key = key.strip().lower()
                 value = value.strip()
+                
                 if key == 'p':
-                    value = ''.join(value.split())  # Remove internal whitespaces
+                    value = ''.join(value.split())
                 dkim_info[key] = value
 
-        # Perform advanced validation
         validation_results = DKIMRecordAnalyzer.perform_advanced_dkim_validation(dkim_info)
         dkim_info['validation_results'] = validation_results
 
@@ -276,8 +290,6 @@ class DKIMRecordAnalyzer:
 
 class DKIMExtractorGUI:
     def __init__(self, root):
-
-    
 
         self.root = root
         self.root.title("Advanced Multi-Domain DKIM Record Extractor")
@@ -320,6 +332,14 @@ class DKIMExtractorGUI:
         )
         logger = logging.getLogger(__name__)
 
+        with open(results_filename, 'w', encoding='utf-8') as results_file:
+            legend = """DKIM FIELD LEGEND:
+    V = Version          K = Key Type          P = Public Key  
+    H = header fields    T = Flags             S = Service Type
+    N = Notes            B = Signature Data    A = Algorithm   
+    C = Canonicalization BH = Body Hash\n\n"""
+            results_file.write(legend)
+        
         return logger, results_filename
 
 
@@ -390,7 +410,7 @@ class DKIMExtractorGUI:
 
     def _analyze_email(self):
         """
-        Analyze a single email for DKIM signatures.
+        Analizza un'email e visualizza i risultati formattati.
         """
         email_path = filedialog.askopenfilename(
             title="Select Email File",
@@ -405,27 +425,40 @@ class DKIMExtractorGUI:
 
             results = EmailDKIMVerifier.verify_email_dkim(email_content)
 
+            # Aggiungi la legenda
+            legend = """DKIM FIELD LEGEND:
+        V = Version          K = Key Type          P = Public Key  
+        H =  header fields - list of those that have been signed   T = Flags             S = Service Type
+        N = Notes            B = Signature Data    A = Algorithm   C = canonicalization algorithm(s) for header and body
+        BH = Body Hash \n"""
+            self.result_text.insert(tk.END, legend + "\n")
+
             with open(self.results_filename, 'a', encoding='utf-8') as results_file:
                 results_file.write("=" * 60 + "\n")
                 results_file.write(f"Email File: {email_path}\n")
                 results_file.write("=" * 60 + "\n")
 
                 for result in results:
-                    # Log results to file
+                    # Scrivi i risultati nel file
                     results_file.write(f"Status: {result['status']}\n")
-                    results_file.write(f"Message: {result['message']}\n")
-                    if 'record' in result:
-                        results_file.write(f"Record: {result['record']}\n")
+                    if 'fields' in result:
+                        results_file.write("DKIM Fields:\n")
+                        results_file.write(EmailDKIMVerifier.format_dkim_fields(result['fields']) + "\n")
                     results_file.write("-" * 60 + "\n")
 
-                    # Display results in GUI
+                    # Mostra i risultati nella GUI
                     self.result_text.insert(tk.END, f"Status: {result['status']}\n")
-                    self.result_text.insert(tk.END, f"Message: {result['message']}\n")
-                    if 'record' in result:
-                        self.result_text.insert(tk.END, f"Record: {result['record']}\n")
+                    
+                    if 'fields' in result:
+                        self.result_text.insert(tk.END, "DKIM Signature Fields:\n")
+                        self.result_text.insert(tk.END, EmailDKIMVerifier.format_dkim_fields(result['fields']) + "\n")
+
+                    # Mostra la chiave pubblica
+                    self.result_text.insert(tk.END, f"Public Key: {result['record'].get('p', 'N/A')}\n")
+                    
                     self.result_text.insert(tk.END, "-" * 60 + "\n")
 
-            # Log completion
+            # Log completamento
             self.logger.info(f"Analysis completed for email: {email_path}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to analyze email: {e}")
@@ -475,6 +508,7 @@ class DKIMExtractorGUI:
         """
         Perform detailed DKIM record analysis for a single domain and display results in the GUI.
         """
+        
         try:
             resolver = dns.resolver.Resolver()
             resolver.nameservers = ["8.8.8.8"]  # Usa il resolver pubblico di Google per evitare reindirizzamenti
@@ -546,107 +580,115 @@ class DKIMExtractorGUI:
             self.logger.error(error_message)
 
     def _perform_multi_domain_analysis(self, domains, selectors=None):
-        """
-        Perform DKIM analysis for multiple domains and display results in the GUI.
-        """
         try:
+            def format_public_key(key, prefix_length=12, max_line_length=64):
+                """Formatta la chiave pubblica mantenendo l'allineamento"""
+                formatted = [key[i:i+max_line_length] for i in range(0, len(key), max_line_length)]
+                return ("\n" + " " * (prefix_length + 2)).join(formatted)
+
+            # Lista dei campi da escludere
+            excluded_fields = ['validation_results', 'raw_record', 'subdomain']
+            # Aggiungi la legenda UNA SOLA VOLTA all'inizio
+            legend = """DKIM FIELD LEGEND:
+        V = Version          K = Key Type          P = Public Key  
+        H =  header fields - list of those that have been signed   T = Flags             S = Service Type
+        N = Notes            B = Signature Data    A = Algorithm   C = canonicalization algorithm(s) for header and body
+        BH = Body Hash \n"""
+        
+            self.result_text.insert(tk.END, legend)
+            
             with open(self.results_filename, 'w', encoding='utf-8') as results_file:
+                results_file.write(legend)
+
                 for domain in domains:
+                     # Intestazione dominio
+                    self.result_text.insert(tk.END, "=" * 60 + "\n")
+                    self.result_text.insert(tk.END, f"Domain: {domain}\n")
+                    self.result_text.insert(tk.END, "=" * 60 + "\n")
+                    results_file.write("=" * 60 + "\n")
+                    results_file.write(f"Domain: {domain}\n")
+                    results_file.write("=" * 60 + "\n")
+
                     # Verifica esistenza dominio
                     resolver = dns.resolver.Resolver()
                     resolver.nameservers = ["8.8.8.8"]
                     domain_exists = False
-                    
+
                     try:
                         resolver.resolve(domain, 'A')
                         domain_exists = True
                     except dns.resolver.NXDOMAIN:
-                        error_msg = f"❌ ERROR: Domain '{domain}' does not exist"
+                        error_msg = f"❌ ERROR: Domain does not exist"
                         self.result_text.insert(tk.END, error_msg + "\n")
-                        results_file.write(error_msg + "\n")
+                        results_file.write(error_msg + "\n\n")
                         continue
                     except (dns.resolver.NoAnswer, dns.exception.Timeout):
-                        warning_msg = f"⚠️ WARNING: Unable to verify existence of '{domain}'"
+                        warning_msg = f"⚠️ WARNING: Unable to verify domain existence"
                         self.result_text.insert(tk.END, warning_msg + "\n")
-                        results_file.write(warning_msg + "\n")
+                        results_file.write(warning_msg + "\n\n")
                         continue
                     except Exception as e:
-                        error_msg = f"❌ ERROR: DNS resolution failed for '{domain}': {str(e)}"
+                        error_msg = f"❌ ERROR: DNS resolution failed: {str(e)}"
                         self.result_text.insert(tk.END, error_msg + "\n")
-                        results_file.write(error_msg + "\n")
+                        results_file.write(error_msg + "\n\n")
                         continue
 
                     # Procedi con l'analisi DKIM solo se il dominio esiste
                     result = DKIMRecordAnalyzer.extract_dkim_records(domain, selectors)
 
-                    # Write to file
-                    results_file.write("=" * 60 + "\n")
-                    results_file.write(f"Domain: {domain}\n")
-                    results_file.write("=" * 60 + "\n")
-                    results_file.write(f"Status: {result['status']}\n\n")
-
-                    # Show in GUI
-                    self.result_text.insert(tk.END, "=" * 60 + "\n")
-                    self.result_text.insert(tk.END, f"Domain: {domain}\n")
-                    self.result_text.insert(tk.END, "=" * 60 + "\n")
-                    self.result_text.insert(tk.END, f"Status: {result['status']}\n\n")
+                    # Scrivi i risultati
+                    #self.result_text.insert(tk.END, "=" * 60 + "\n")
+                    #self.result_text.insert(tk.END, f"Domain: {domain}\n")
+                    #self.result_text.insert(tk.END, "=" * 60 + "\n")
+                    #self.result_text.insert(tk.END, f"Status: {result['status']}\n\n")
+                    
 
                     if result['status'] == 'No records found':
-                        #self.result_text.insert(tk.END, f"⚠️ No DKIM records found for '{domain}'.\n")
-                        self.result_text.insert(tk.END, "-" * 60 + "\n\n")
+                        self.result_text.insert(tk.END, "⚠️ No DKIM records found\n")
+                        results_file.write("Status: No records found\n\n")
                         continue
 
+                    # Nuova intestazione status
+                    self.result_text.insert(tk.END, f"Status: {result['status']}\n\n")
+                    results_file.write(f"Status: {result['status']}\n\n")
+
+                    # Loop sui record con numerazione
                     for i, record in enumerate(result['records'], 1):
-                        # Get validation results
-                        validation_results = record.get('validation_results', {})
-                        status_text = "✓ Valid" if validation_results.get('is_valid', False) else "✗ Invalid"
-                        security_level = validation_results.get('security_level', 'UNKNOWN')
+                        record_header = f"Record {i}:"
+                        self.result_text.insert(tk.END, record_header + "\n")
+                        self.result_text.insert(tk.END, "-" * 60 + "\n")
+                        results_file.write(record_header + "\n")
+                        results_file.write("-" * 60 + "\n")
 
-                        # Write to file
-                        results_file.write(f"DKIM Record {i}:\n")
-                        results_file.write(f"    Validation Status: {status_text}\n")
-                        results_file.write(f"    Selector: {record.get('selector', 'N/A')}\n")
-                        results_file.write(f"    Version: {record.get('v', 'N/A')}\n")
-                        results_file.write(f"    Key Type: {record.get('k', 'N/A')}\n")
+                        # Campi da visualizzare in ordine specifico
+                        fields = [
+                            ('v', 'V           '),
+                            ('k', 'K           '),
+                            ('p', 'P           '),
+                            ('n', 'N           '),
+                            ('selector', 'SELECTOR    ')
+                        ]
 
-                        # Show in GUI
-                        self.result_text.insert(tk.END, f"DKIM Record {i}:\n")
-                        self.result_text.insert(tk.END, f"    Validation Status: {status_text}\n")
-                        self.result_text.insert(tk.END, f"    Selector: {record.get('selector', 'N/A')}\n")
-                        self.result_text.insert(tk.END, f"    Version: {record.get('v', 'N/A')}\n")
-                        self.result_text.insert(tk.END, f"    Key Type: {record.get('k', 'N/A')}\n")
+                        for field_key, header in fields:
+                            value = record.get(field_key, 'N/A')
+                            
+                            if field_key == 'p':  # Formattazione speciale per la chiave pubblica
+                                formatted_value = format_public_key(value, 14)
+                                line = f"{header}: {formatted_value}"
+                            else:
+                                line = f"{header}: {value}"
+                                
+                            self.result_text.insert(tk.END, line + "\n")
+                            results_file.write(line + "\n")
 
-                        # Display errors if any
-                        if validation_results.get('errors'):
-                            results_file.write("    Errors:\n")
-                            self.result_text.insert(tk.END, "    Errors:\n")
-                            for error in validation_results['errors']:
-                                results_file.write(f"      - {error}\n")
-                                self.result_text.insert(tk.END, f"      - {error}\n")
-
-                        if 'p' in record:
-                            public_key = record['p']
-                            key_length = len(public_key)
-                            results_file.write(f"    Public Key: {public_key}\n")
-                            results_file.write(f"    Public Key Length: {key_length} characters\n")
-                            self.result_text.insert(tk.END, f"    Public Key: {public_key}\n")
-                            self.result_text.insert(tk.END, f"    Public Key Length: {key_length} characters\n")
-                        else:
-                            results_file.write("    Public Key: Not Found\n")
-                            self.result_text.insert(tk.END, "    Public Key: Not Found\n")
-
-                        
-                        results_file.write("\n" + "-" * 60 + "\n\n")
-                        self.result_text.insert(tk.END, "\n" + "-" * 60 + "\n\n")
-
-                    # Scroll to end
-                    self.result_text.see(tk.END)
+                        self.result_text.insert(tk.END, "-" * 60 + "\n\n")
+                        results_file.write("-" * 60 + "\n\n")
 
         except Exception as e:
-            error_message = f"Error during multi-domain analysis: {e}"
+            error_message = f"Error during multi-domain analysis: {str(e)}"
             self.result_text.insert(tk.END, error_message + "\n")
-            self.result_text.see(tk.END)
-
+        
+        
 
     def _update_progress_label(self, text):
         """
@@ -752,23 +794,37 @@ class EmailDKIMVerifier:
 
             print(f"Querying DKIM record: {query}")  # Debug output
             txt_records = resolver.resolve(query, 'TXT')
+            
             for txt in txt_records:
-                # Convert bytes to string
-                record = ''.join([entry.decode('utf-8') if isinstance(entry, bytes) else entry for entry in txt.strings])
+                # Converti i bytes in stringa
+                record = ''.join([s.decode('utf-8') if isinstance(s, bytes) else s for s in txt.strings])
+                
                 if 'v=DKIM1' in record:
                     print(f"Found DKIM record: {record}")  # Debug output
-                    return record
+                    # Esegui il parsing completo del record DKIM
+                    parsed_record = DKIMRecordAnalyzer._parse_dkim_record(record)
+                    return parsed_record
+                    
         except dns.resolver.NoAnswer:
             print(f"No DKIM record found for {query}.")
         except Exception as e:
             print(f"Error validating DKIM record: {e}")
         return None
-
+    
+    @staticmethod
+    def format_dkim_fields(fields):
+        """
+        Formatta i campi DKIM in modo leggibile e allineato.
+        """
+        formatted_output = []
+        for key, value in fields.items():
+            formatted_output.append(f"{key.upper():<12}: {value}")
+        return "\n".join(formatted_output)
 
     @staticmethod
     def verify_email_dkim(email_content):
         """
-        Verify DKIM signatures in an email.
+        Verifica le firme DKIM in un'email e restituisce i risultati formattati.
         """
         results = []
         headers = EmailDKIMVerifier.extract_dkim_header(email_content)
@@ -781,22 +837,29 @@ class EmailDKIMVerifier:
             if not domain or not selector:
                 results.append({
                     'status': 'Error',
-                    'message': 'Missing domain (d) or selector (s) in DKIM signature.'
+                    'message': 'Missing domain (d) or selector (s) in DKIM signature.',
+                    'fields': fields
                 })
                 continue
 
             dkim_record = EmailDKIMVerifier.validate_dkim_signature(domain, selector)
 
-            if not dkim_record:
+            if not dkim_record or 'p' not in dkim_record:
                 results.append({
                     'status': 'Failed',
-                    'message': f"No valid DKIM record found for domain {domain} and selector {selector}."
+                    'message': f"No valid DKIM record found for domain {domain} and selector {selector}.",
+                    'fields': fields
                 })
             else:
+                # Aggiungi la validazione avanzata
+                validation = DKIMRecordAnalyzer.perform_advanced_dkim_validation(dkim_record)
+                
                 results.append({
                     'status': 'Success',
                     'message': f"Valid DKIM record found for domain {domain} and selector {selector}.",
-                    'record': dkim_record
+                    'record': dkim_record,
+                    'fields': fields,
+                    'validation': validation  # Aggiungi i risultati della validazione
                 })
 
         return results
@@ -825,6 +888,8 @@ def setup_logging_and_results(is_cli=False):
 
     return logger, results_filename
 
+    
+
 def run_cli():
     logger, results_filename = setup_logging_and_results(is_cli=True)
     while True:
@@ -837,33 +902,60 @@ def run_cli():
         if choice == '1':
             domain = input("Enter the domain to analyze: ")
             if DKIMRecordAnalyzer.validate_domain(domain):
+                custom_sel = input("Enter custom selectors (comma-separated, leave empty for auto-discovery): ")
+                selectors = [s.strip() for s in custom_sel.split(',')] if custom_sel else None
+                
                 print(f"Analyzing DKIM records for domain: {domain}")
                 print("Performing DNS queries, please wait...")
-                result = DKIMRecordAnalyzer.extract_dkim_records(domain)
+                result = DKIMRecordAnalyzer.extract_dkim_records(domain, selectors)
                 
-                # Salvataggio dei risultati nel file results
                 with open(results_filename, 'a', encoding='utf-8') as results_file:
+                    # Scrivi l'intestazione del dominio PRIMA di qualsiasi controllo
                     results_file.write("=" * 60 + "\n")
                     results_file.write(f"Domain: {domain}\n")
-                    results_file.write(f"Status: {result['status']}\n")
+                    results_file.write("=" * 60 + "\n")
+
+                    # Scrittura record
                     for record in result['records']:
-                        results_file.write(f"Selector: {record.get('selector', 'N/A')}\n")
-                        results_file.write(f"Record: {record.get('raw_record', 'N/A')}\n")
                         results_file.write("-" * 60 + "\n")
-                
-                logger.info(f"Analysis completed for domain: {domain}")
-                
-                # Stampa dei risultati nella CLI
+                        for field_key, field_label in [
+                            ('v', 'Version'),
+                            ('k', 'Key Type'),
+                            ('p', 'Public Key'),
+                            ('selector', 'Selector'),
+                            ('h', 'Signed Headers'),
+                            ('t', 'Flags'),
+                            ('s', 'Service Type'),
+                            ('n', 'Notes')
+                        ]:
+                            if field_key in record:
+                                results_file.write(f"{field_label:<12}: {record[field_key]}\n")
+                        results_file.write("=" * 60 + "\n\n")
+
+                # Stampa a console
                 print("=" * 60)
                 print(f"Domain: {domain}")
                 print(f"Status: {result['status']}")
                 for record in result['records']:
                     print("-" * 60)
-                    print(f"Selector: {record.get('selector', 'N/A')}")
-                    print(f"Record: {record.get('raw_record', 'N/A')}")
+                # ... (mantieni la stampa a console esistente)
+                # Lista dei campi da mostrare in ordine specifico
+                fields_to_display = [
+                    ('v', 'Version'),
+                    ('k', 'Key Type'),
+                    ('p', 'Public Key'),
+                    ('selector', 'Selector'),
+                    ('h', 'Signed Headers'),
+                    ('t', 'Flags'),
+                    ('s', 'Service Type'),
+                    ('n', 'Notes')
+                ]
+                
+                # Mostra solo i campi rilevanti ed evita duplicati
+                for field_key, field_label in fields_to_display:
+                    if field_key in record:
+                        print(f"{field_label:<12}: {record[field_key]}")
                 print("=" * 60)
-            else:
-                print(f"Invalid domain: {domain}")
         elif choice == '2':
             email_path = input("Enter the path to the email file (.eml): ").strip()
 
@@ -876,29 +968,38 @@ def run_cli():
                     print("Analyzing email for DKIM signatures...")
                     results = EmailDKIMVerifier.verify_email_dkim(email_content)
 
+                    # Aggiungi la legenda
+                    legend = """\nDKIM FIELD LEGEND:
+        v = Version          k = Key Type          p = Public Key
+        h = Hash Algorithm   t = Flags             s = Service Type
+        n = Notes            b = Signature Data    a = Algorithm\n"""
+                    print(legend)
+
                     with open(results_filename, 'a', encoding='utf-8') as results_file:
                         results_file.write("=" * 60 + "\n")
                         results_file.write(f"Email File: {email_path}\n")
+                        results_file.write("=" * 60 + "\n")
+
                         for result in results:
                             results_file.write(f"Status: {result['status']}\n")
-                            results_file.write(f"Message: {result['message']}\n")
-                            if 'record' in result:
-                                results_file.write(f"Record: {result['record']}\n")
+                            #results_file.write(f"Message: {result['message']}\n")
+                            if 'fields' in result:
+                                results_file.write("DKIM Fields:\n")
+                                results_file.write(EmailDKIMVerifier.format_dkim_fields(result['fields']) + "\n")
                             results_file.write("-" * 60 + "\n")
 
-                    logger.info(f"Analysis completed for email: {email_path}")
-
+                    # Stampa i risultati nella CLI
                     print("=" * 60)
                     for result in results:
                         print(f"Status: {result['status']}")
-                        print(f"Message: {result['message']}")
-                        if 'record' in result:
-                            print(f"Record: {result['record']}")
+                        #print(f"Message: {result['message']}")
+                        if 'fields' in result:
+                            print("DKIM Fields:")
+                            print(EmailDKIMVerifier.format_dkim_fields(result['fields']))
                         print("-" * 60)
                     print("=" * 60)
                 except Exception as e:
                     print(f"Error reading the file: {e}")
-
         elif choice == '3':
             print("Exiting the CLI. Goodbye!")
             break
